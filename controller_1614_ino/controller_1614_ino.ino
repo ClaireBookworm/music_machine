@@ -3,7 +3,7 @@
 #define DEVICE_ID 0x42  // change per device
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
 }
 
 void loop() {
@@ -15,5 +15,5 @@ void loop() {
   // then append our id
   Serial.write(DEVICE_ID);
   
-  delay(10);  // ~100hz
+  delay(50);  // ~100hz
 }
