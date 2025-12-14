@@ -1,7 +1,7 @@
 import wave
 import sys
 
-def trim_wav(input_file, output_file=None, max_seconds=10.0):
+def trim_wav(input_file, output_file=None, max_seconds=4.0):
     """Trim WAV file to max_seconds duration."""
     if output_file is None:
         base = input_file.rsplit('.', 1)[0]

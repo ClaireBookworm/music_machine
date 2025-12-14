@@ -182,10 +182,10 @@ if __name__ == '__main__':
         wav_files = sys.argv[1:]
     else:
         wav_files = [
-            'Seventies-funk-drum-loop-109-BPM.wav',
-            'Square-synth-keys-loop-112-bpm.wav',
-            'Funk-groove-loop.wav',
-            'Groove-loop-126-bpm.wav'
+            'data/Seventies-funk-drum-loop-109-BPM.wav',
+            'data/Square-synth-keys-loop-112-bpm.wav',
+            'data/Funk-groove-loop.wav',
+            'data/Groove-loop-126-bpm.wav'
         ]
     
     total_size = 0
