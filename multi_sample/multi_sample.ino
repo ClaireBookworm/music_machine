@@ -1,208 +1,249 @@
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include "Seventies-funk-drum-loop-109-BPM.h"
+#include "Square-synth-keys-loop-112-bpm.h"
+#include "Funk-groove-loop.h"
+#include "Groove-loop-126-bpm.h"
 #include <I2S.h>
 
-// RP2040 multicore
-#include <pico/multicore.h>
+#include <SerialPIO.h>
 
-#include "music_files/Seventies-funk-drum-loop-109-BPM.h"
-#include "music_files/Square-synth-keys-loop-112-bpm.h"
-#include "music_files/Funk-groove-loop.h"
-#include "music_files/Groove-loop-126-bpm.h"
+#define ALARM_DT_NUM 1
+#define ALARM_DT_IRQ TIMER_IRQ_1
 
-// ---------------- OLED ----------------
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+#define SAMPLE_RATE 22050
+#define SAMPLE_DT_US 45
 
-// ---------------- I2S ----------------
+#define DELAY_ABSENT_MS 300
+
+#define N_TRACKS 4
+
+#define TRACK_INVALID -1
+
+
 I2S i2s(OUTPUT);
 
-// ---------------- Track positions (core0 audio only) ----------------
-uint32_t pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+uint32_t _delT_us = SAMPLE_DT_US;
 
-const char *track1_name = "Drums";
-const char *track2_name = "Synth Keys";
-const char *track3_name = "Funk Groove";
-const char *track4_name = "Groove";
+const int16_t* track_pointers[N_TRACKS] = {seventies_funk_drum_loop_109_bpm_data, square_synth_keys_loop_112_bpm_data, funk_groove_loop_data, groove_loop_126_bpm_data};
+int32_t track_lengths[N_TRACKS] = {SEVENTIES_FUNK_DRUM_LOOP_109_BPM_LENGTH, SQUARE_SYNTH_KEYS_LOOP_112_BPM_LENGTH, FUNK_GROOVE_LOOP_LENGTH, GROOVE_LOOP_126_BPM_LENGTH};
+const char* track_names[N_TRACKS] = {"Drums", "Synth Keys", "Funk Groove", "Groove"};
 
-// ---------------- Shared state (core1 -> core0) ----------------
-// bit0..bit3 correspond to tracks 1..4
-volatile uint8_t g_active_mask = 0;
+struct TrackInfo {
+  bool is_playing;
+  int track_id;
+  uint32_t counter;
+};
 
-// How long a track stays “active” after we last saw its ID byte
-static const uint32_t ACTIVE_HOLD_MS = 150;
+struct TrackInfo track1 = {false, 0, 0};
+struct TrackInfo track2 = {false, 0, 0};
+struct TrackInfo track3 = {false, 0, 0};
+struct TrackInfo track4 = {false, 0, 0};
 
-// ---------------- Device -> track mapping ----------------
-// return 0..3 for tracks; 255 for unknown
-uint8_t deviceToTrack(uint8_t id) {
-  switch (id) {
-    case 0x42: return 0; // drums
-    case 0x02: return 1; // synth
-    case 0x03: return 2; // funk
-    case 0x04: return 3; // groove
-    default:   return 255;
-  }
-}
+SerialPIO ser2(8, 4);
+SerialPIO ser3(9, 2);
+SerialPIO ser4(10, 3);
 
-// ---------------- OLED helper ----------------
-void updateDisplayFromMask(uint8_t mask) {
-  bool a1 = mask & 0x01;
-  bool a2 = mask & 0x02;
-  bool a3 = mask & 0x04;
-  bool a4 = mask & 0x08;
+void alarm_dt_handler(void){
+  // setup next call right away
+  hw_clear_bits(&timer_hw->intr, 1u << ALARM_DT_NUM);
+  timer_hw->alarm[ALARM_DT_NUM] = (uint32_t) (timer_hw->timerawl + _delT_us);
 
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
+  int32_t mixed = 0;
 
-  bool any = a1 || a2 || a3 || a4;
+  const int16_t* track_ptr;
+  int32_t track_len;
 
-  if (!any) {
-    display.setTextSize(2);
-    display.setCursor(20, 24);
-    display.println("ready");
-  } else {
-    display.setTextSize(1);
-    int y = 0;
-    if (a1) { display.setCursor(0, y); display.print("T1: "); display.println(track1_name); y += 10; }
-    if (a2) { display.setCursor(0, y); display.print("T2: "); display.println(track2_name); y += 10; }
-    if (a3) { display.setCursor(0, y); display.print("T3: "); display.println(track3_name); y += 10; }
-    if (a4) { display.setCursor(0, y); display.print("T4: "); display.println(track4_name); y += 10; }
-  }
+  if (track1.is_playing) {
+    track_ptr = track_pointers[track1.track_id];
+    track_len = track_lengths[track1.track_id];
 
-  display.display();
-}
-
-// ---------------- Core1 task: UART parsing ----------------
-void core1_task() {
-  uint32_t last_seen[4] = {0, 0, 0, 0};
-
-  while (true) {
-    // Read all bytes available, update last_seen per track
-    while (Serial1.available()) {
-      uint8_t b = (uint8_t)Serial1.read();
-      uint8_t t = deviceToTrack(b);
-      if (t < 4) last_seen[t] = millis();
+    mixed += track_ptr[track1.counter] / N_TRACKS;
+    
+    track1.counter++;
+    if (track1.counter >= track_len) {
+      track1.counter = 0;
     }
-
-    // Compute active mask with hold time
-    uint32_t now = millis();
-    uint8_t mask = 0;
-    for (int i = 0; i < 4; i++) {
-      if (now - last_seen[i] <= ACTIVE_HOLD_MS) mask |= (1u << i);
-    }
-
-    g_active_mask = mask;
-
-    // Small yield so core1 doesn’t spin at 100% for no reason
-    delay(1);
   }
+
+  if (track2.is_playing) {
+    track_ptr = track_pointers[track2.track_id];
+    track_len = track_lengths[track2.track_id];
+
+    mixed += track_ptr[track2.counter] / N_TRACKS;
+    
+    track2.counter++;
+    if (track2.counter >= track_len) {
+      track2.counter = 0;
+    }
+  }
+
+  if (track3.is_playing) {
+    track_ptr = track_pointers[track3.track_id];
+    track_len = track_lengths[track3.track_id];
+
+    mixed += track_ptr[track3.counter] / N_TRACKS;
+    
+    track3.counter++;
+    if (track3.counter >= track_len) {
+      track3.counter = 0;
+    }
+  }
+
+  if (track4.is_playing) {
+    track_ptr = track_pointers[track4.track_id];
+    track_len = track_lengths[track4.track_id];
+
+    mixed += track_ptr[track4.counter] / N_TRACKS;
+    
+    track4.counter++;
+    if (track4.counter >= track_len) {
+      track4.counter = 0;
+    }
+  }
+
+  int16_t output = (int16_t)mixed;
+  int32_t output32 = (output << 16) | (output & 0xffff);
+  i2s.write(output32, false);
 }
 
-// ---------------- Audio helpers ----------------
-static inline int16_t clamp16(int32_t x) {
-  if (x > 32767) return 32767;
-  if (x < -32768) return -32768;
-  return (int16_t)x;
-}
-
-// ---------------- setup ----------------
 void setup() {
-  Serial.begin(9600);
-  delay(200);
+  Serial.begin(0);
 
-  // Hardware UART (default pins for Serial1)
-  Serial1.begin(9600);
+  Serial1.begin(115200, SERIAL_8E2);
+  ser2.begin(115200, SERIAL_8E2);  
+  ser3.begin(115200, SERIAL_8E2);  
+  ser4.begin(115200, SERIAL_8E2);  
 
-  // OLED init (core0 does setup; later we update at low rate)
-  Wire.setSDA(6);
-  Wire.setSCL(7);
-  Wire.begin();
-  Wire.setClock(400000);
+  // setup I2S
+	i2s.setBCLK(28);
+	i2s.setDATA(27);
+	i2s.setBitsPerSample(16);
+	i2s.begin(SAMPLE_RATE);
 
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    while (1) {}
-  }
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setCursor(20, 24);
-  display.println("ready");
-  display.display();
-
-  // I2S init (core0)
-  i2s.setBCLK(28);
-  i2s.setDATA(27);
-  i2s.setBitsPerSample(16);
-
-  // More buffering helps; feel free to push higher
-  i2s.setBuffers(16, 256, 0);
-
-  if (!i2s.begin(SEVENTIES_FUNK_DRUM_LOOP_109_BPM_RATE)) {
-    while (1) {}
-  }
-  
-
-  // Launch core1 AFTER Serial1 is configured
-  multicore_launch_core1(core1_task);
+  // setup interrupt
+  hw_set_bits(&timer_hw->inte, 1u << ALARM_DT_NUM);
+  irq_set_exclusive_handler(ALARM_DT_IRQ, alarm_dt_handler);
+  irq_set_enabled(ALARM_DT_IRQ, true);
+  timer_hw->alarm[ALARM_DT_NUM] = (uint32_t) (timer_hw->timerawl + _delT_us);
 }
 
-// ---------------- loop (core0): audio only ----------------
+int id_to_track(char id) {
+	switch (id) {
+	  case 0x01:
+     return 0;
+	  case 0x02:
+     return 1;
+	  case 0x03:
+     return 2;
+	  case 0x04:
+     return 3;
+	  default:
+     return TRACK_INVALID;
+	}
+}
+
 void loop() {
-  // OPTIONAL: OLED update at a safe cadence
-  static uint32_t last_oled_ms = 0;
-  uint32_t now_ms = millis();
-  if (now_ms - last_oled_ms >= 200) {   // 5 Hz
-    last_oled_ms = now_ms;
-    updateDisplayFromMask(g_active_mask);
+  static unsigned long t1 = 0;
+  static unsigned long t2 = 0;
+  static unsigned long t3 = 0;
+  static unsigned long t4 = 0;
+
+  bool connected1 = false;
+
+  char b = 0;
+
+  int track_id = TRACK_INVALID;
+
+  if (Serial1.available()) {
+    b = Serial1.read();
+    t1 = millis();
+    Serial.print("on 1: ");
+    Serial.println((int)b, HEX);
+
+    track_id = id_to_track(b);
+    
+    if (!track1.is_playing) {
+      if (track_id != TRACK_INVALID) {
+        track1.track_id = track_id;
+        track1.is_playing = true;
+      }
+    }
   }
 
-  // Audio block render + write
-  const int BLOCK = 128;
-  int16_t buf[BLOCK];
+  if (ser2.available()) {
+    b = ser2.read();
+    t2 = millis();
+    Serial.print("on 2: ");
+    Serial.println((int)b, HEX);
 
-  // Wait until there is room for the whole block (stereo -> *2)
-  while (i2s.availableForWrite() < (BLOCK * 2)) {
-    // tight spin; core0 should prioritize audio
+    track_id = id_to_track(b);
+    
+    if (!track2.is_playing) {
+      if (track_id != TRACK_INVALID) {
+        track2.track_id = track_id;
+        track2.is_playing = true;
+      }
+    }
   }
 
-  uint8_t mask = g_active_mask;
-  bool a1 = mask & 0x01;
-  bool a2 = mask & 0x02;
-  bool a3 = mask & 0x04;
-  bool a4 = mask & 0x08;
+  if (ser3.available()) {
+    b = ser3.read();
+    t3 = millis();
+    Serial.print("on 3: ");
+    Serial.println((int)b, HEX);
 
-  for (int n = 0; n < BLOCK; n++) {
-    int32_t mixed = 0;
-    int c = 0;
-
-    if (a1) {
-      mixed += (int32_t)pgm_read_word(&seventies_funk_drum_loop_109_bpm_data[pos1++]);
-      if (pos1 >= SEVENTIES_FUNK_DRUM_LOOP_109_BPM_LENGTH) pos1 = 0;
-      c++;
+    track_id = id_to_track(b);
+    
+    if (!track3.is_playing) {
+      if (track_id != TRACK_INVALID) {
+        track3.track_id = track_id;
+        track3.is_playing = true;
+      }
     }
-    if (a2) {
-      mixed += (int32_t)pgm_read_word(&square_synth_keys_loop_112_bpm_data[pos2++]);
-      if (pos2 >= SQUARE_SYNTH_KEYS_LOOP_112_BPM_LENGTH) pos2 = 0;
-      c++;
-    }
-    if (a3) {
-      mixed += (int32_t)pgm_read_word(&funk_groove_loop_data[pos3++]);
-      if (pos3 >= FUNK_GROOVE_LOOP_LENGTH) pos3 = 0;
-      c++;
-    }
-    if (a4) {
-      mixed += (int32_t)pgm_read_word(&groove_loop_126_bpm_data[pos4++]);
-      if (pos4 >= GROOVE_LOOP_126_BPM_LENGTH) pos4 = 0;
-      c++;
-    }
-
-    if (c) mixed /= c;
-    buf[n] = clamp16(mixed);
   }
 
-  for (int n = 0; n < BLOCK; n++) {
-    i2s.write16(buf[n], buf[n]);
+  if (ser4.available()) {
+    b = ser4.read();
+    t4 = millis();
+    Serial.print("on 4: ");
+    Serial.println((int)b, HEX);
+
+    track_id = id_to_track(b);
+    
+    if (!track4.is_playing) {
+      if (track_id != TRACK_INVALID) {
+        track4.track_id = track_id;
+        track4.is_playing = true;
+      }
+    }
+  }
+
+  delay(20);
+
+  if (track1.is_playing) {
+    if (millis() - t1 > DELAY_ABSENT_MS) {
+      track1.is_playing = false;
+      track1.counter = 0;
+    }
+  }
+
+  if (track2.is_playing) {
+    if (millis() - t2 > DELAY_ABSENT_MS) {
+      track2.is_playing = false;
+      track2.counter = 0;
+    }
+  }
+
+  if (track3.is_playing) {
+    if (millis() - t3 > DELAY_ABSENT_MS) {
+      track3.is_playing = false;
+      track3.counter = 0;
+    }
+  }
+
+  if (track4.is_playing) {
+    if (millis() - t4 > DELAY_ABSENT_MS) {
+      track4.is_playing = false;
+      track4.counter = 0;
+    }
   }
 }
