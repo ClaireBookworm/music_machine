@@ -3,7 +3,7 @@
 #define DEVICE_ID 0x42  // change per device
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(57600);
 }
 
 void loop() {
