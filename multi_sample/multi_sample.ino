@@ -1,228 +1,249 @@
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include "Seventies-funk-drum-loop-109-BPM.h"
+#include "Square-synth-keys-loop-112-bpm.h"
+#include "Funk-groove-loop.h"
+#include "Groove-loop-126-bpm.h"
 #include <I2S.h>
-#include "music_files/Seventies-funk-drum-loop-109-BPM.h"
-#include "music_files/Square-synth-keys-loop-112-bpm.h"
-#include "music_files/Funk-groove-loop.h"
-#include "music_files/Groove-loop-126-bpm.h"
 
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+#include <SerialPIO.h>
+
+#define ALARM_DT_NUM 1
+#define ALARM_DT_IRQ TIMER_IRQ_1
+
+#define SAMPLE_RATE 22050
+#define SAMPLE_DT_US 45
+
+#define DELAY_ABSENT_MS 300
+
+#define N_TRACKS 4
+
+#define TRACK_INVALID -1
+
 
 I2S i2s(OUTPUT);
 
-// input pins - connected to TX pins from controller
-// PIN1 = GPIO 3 (P3/D10) -> drums
-// PIN2 = GPIO 4 (P4/D9) -> synth
-// PIN3 = GPIO 2 (P2/D8) -> funk
-// PIN4 = GPIO 1 (P1/D7) -> groove
-#define PIN1 3
-#define PIN2 4
-#define PIN3 2
-#define PIN4 1
+uint32_t _delT_us = SAMPLE_DT_US;
 
-// track position in each sample
-uint32_t pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+const int16_t* track_pointers[N_TRACKS] = {seventies_funk_drum_loop_109_bpm_data, square_synth_keys_loop_112_bpm_data, funk_groove_loop_data, groove_loop_126_bpm_data};
+int32_t track_lengths[N_TRACKS] = {SEVENTIES_FUNK_DRUM_LOOP_109_BPM_LENGTH, SQUARE_SYNTH_KEYS_LOOP_112_BPM_LENGTH, FUNK_GROOVE_LOOP_LENGTH, GROOVE_LOOP_126_BPM_LENGTH};
+const char* track_names[N_TRACKS] = {"Drums", "Synth Keys", "Funk Groove", "Groove"};
 
-const char* pin1_name = "Drums";
-const char* pin2_name = "Synth Keys";
-const char* pin3_name = "Funk Groove";
-const char* pin4_name = "Groove";
+struct TrackInfo {
+  bool is_playing;
+  int track_id;
+  uint32_t counter;
+};
 
-uint32_t display_counter = 0;
-#define DISPLAY_UPDATE_INTERVAL 4410  // update ~10x per second
-uint32_t debug_counter = 0;
-#define DEBUG_UPDATE_INTERVAL 4410  // print debug info ~10x per second
+struct TrackInfo track1 = {false, 0, 0};
+struct TrackInfo track2 = {false, 0, 0};
+struct TrackInfo track3 = {false, 0, 0};
+struct TrackInfo track4 = {false, 0, 0};
 
-void updateDisplay(bool active1, bool active2, bool active3, bool active4) {
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-  
-  // Check if any pin is active
-  bool any_active = active1 || active2 || active3 || active4;
-  
-  if (!any_active) {
-    // Show "ready" when no pins are active (standby)
-    display.setTextSize(2);
-    display.setCursor(20, 24);
-    display.println("ready");
-  } else {
-    // Show active pins
-    display.setTextSize(1);
-    int y = 0;
-    if (active1) {
-      display.setCursor(0, y);
-      display.print("P"); display.print(PIN1);
-      display.print(": "); display.println(pin1_name);
-      y += 10;
-    }
-    if (active2) {
-      display.setCursor(0, y);
-      display.print("P"); display.print(PIN2);
-      display.print(": "); display.println(pin2_name);
-      y += 10;
-    }
-    if (active3) {
-      display.setCursor(0, y);
-      display.print("P"); display.print(PIN3);
-      display.print(": "); display.println(pin3_name);
-      y += 10;
-    }
-    if (active4) {
-      display.setCursor(0, y);
-      display.print("P"); display.print(PIN4);
-      display.print(": "); display.println(pin4_name);
-      y += 10;
+SerialPIO ser2(8, 4);
+SerialPIO ser3(9, 2);
+SerialPIO ser4(10, 3);
+
+void alarm_dt_handler(void){
+  // setup next call right away
+  hw_clear_bits(&timer_hw->intr, 1u << ALARM_DT_NUM);
+  timer_hw->alarm[ALARM_DT_NUM] = (uint32_t) (timer_hw->timerawl + _delT_us);
+
+  int32_t mixed = 0;
+
+  const int16_t* track_ptr;
+  int32_t track_len;
+
+  if (track1.is_playing) {
+    track_ptr = track_pointers[track1.track_id];
+    track_len = track_lengths[track1.track_id];
+
+    mixed += track_ptr[track1.counter] / N_TRACKS;
+    
+    track1.counter++;
+    if (track1.counter >= track_len) {
+      track1.counter = 0;
     }
   }
-  
-  display.display();
+
+  if (track2.is_playing) {
+    track_ptr = track_pointers[track2.track_id];
+    track_len = track_lengths[track2.track_id];
+
+    mixed += track_ptr[track2.counter] / N_TRACKS;
+    
+    track2.counter++;
+    if (track2.counter >= track_len) {
+      track2.counter = 0;
+    }
+  }
+
+  if (track3.is_playing) {
+    track_ptr = track_pointers[track3.track_id];
+    track_len = track_lengths[track3.track_id];
+
+    mixed += track_ptr[track3.counter] / N_TRACKS;
+    
+    track3.counter++;
+    if (track3.counter >= track_len) {
+      track3.counter = 0;
+    }
+  }
+
+  if (track4.is_playing) {
+    track_ptr = track_pointers[track4.track_id];
+    track_len = track_lengths[track4.track_id];
+
+    mixed += track_ptr[track4.counter] / N_TRACKS;
+    
+    track4.counter++;
+    if (track4.counter >= track_len) {
+      track4.counter = 0;
+    }
+  }
+
+  int16_t output = (int16_t)mixed;
+  int32_t output32 = (output << 16) | (output & 0xffff);
+  i2s.write(output32, false);
 }
 
 void setup() {
-  Serial.begin(115200);
-  delay(1000);  // Wait for Serial to initialize
-  Serial.println("\n\n=== RP2040 Music Machine Starting ===");
-  Serial.println("Serial monitor connected!");
-  
-  // Use INPUT if TX pins actively drive the line, INPUT_PULLDOWN if they're open-drain
-  // pinMode(PIN1, INPUT_PULLDOWN)
-  pinMode(PIN1, INPUT_PULLDOWN);  // TX pins typically drive HIGH/LOW, no pull needed
-  pinMode(PIN2, INPUT_PULLDOWN);
-  pinMode(PIN3, INPUT_PULLDOWN);
-  pinMode(PIN4, INPUT_PULLDOWN);
-  Serial.println("Pins configured as INPUT");
-  
-  Wire.setSDA(6);  // for SDA on pin 6
-  Wire.setSCL(7);  // for SCL on pin 7
-  Wire.begin();
-  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println("Display FAIL!");
-    while(1);
-  }
-  
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setCursor(20, 24);
-  display.println("ready");
-  display.display();
-  
-  Serial.println("Audio data loaded from header files!");
-  Serial.print("  Drums: "); Serial.print(SEVENTIES_FUNK_DRUM_LOOP_109_BPM_LENGTH); Serial.println(" samples");
-  Serial.print("  Synth: "); Serial.print(SQUARE_SYNTH_KEYS_LOOP_112_BPM_LENGTH); Serial.println(" samples");
-  Serial.print("  Funk: "); Serial.print(FUNK_GROOVE_LOOP_LENGTH); Serial.println(" samples");
-  Serial.print("  Groove: "); Serial.print(GROOVE_LOOP_126_BPM_LENGTH); Serial.println(" samples");
-  Serial.println("System ready - waiting for pin input...");
-  Serial.println("---");
-  
-  i2s.setBCLK(28);
-  i2s.setDATA(27);
-  i2s.setBitsPerSample(16);
-  
-  // Use the sample rate from headers (they should all be the same)
-  if(!i2s.begin(SEVENTIES_FUNK_DRUM_LOOP_109_BPM_RATE)) {
-    Serial.println("I2S FAILED!");
-    while(1);
-  }
-  Serial.print("I2S initialized at "); 
-  Serial.print(SEVENTIES_FUNK_DRUM_LOOP_109_BPM_RATE); 
-  Serial.println(" Hz");
+  Serial.begin(0);
+
+  Serial1.begin(115200, SERIAL_8E2);
+  ser2.begin(115200, SERIAL_8E2);  
+  ser3.begin(115200, SERIAL_8E2);  
+  ser4.begin(115200, SERIAL_8E2);  
+
+  // setup I2S
+	i2s.setBCLK(28);
+	i2s.setDATA(27);
+	i2s.setBitsPerSample(16);
+	i2s.begin(SAMPLE_RATE);
+
+  // setup interrupt
+  hw_set_bits(&timer_hw->inte, 1u << ALARM_DT_NUM);
+  irq_set_exclusive_handler(ALARM_DT_IRQ, alarm_dt_handler);
+  irq_set_enabled(ALARM_DT_IRQ, true);
+  timer_hw->alarm[ALARM_DT_NUM] = (uint32_t) (timer_hw->timerawl + _delT_us);
+}
+
+int id_to_track(char id) {
+	switch (id) {
+	  case 0x01:
+     return 0;
+	  case 0x02:
+     return 1;
+	  case 0x03:
+     return 2;
+	  case 0x04:
+     return 3;
+	  default:
+     return TRACK_INVALID;
+	}
 }
 
 void loop() {
-  bool active1 = digitalRead(PIN1);
-  bool active2 = digitalRead(PIN2);
-  bool active3 = digitalRead(PIN3);
-  bool active4 = digitalRead(PIN4);
-  
-  if (display_counter % DISPLAY_UPDATE_INTERVAL == 0) {
-    updateDisplay(active1, active2, active3, active4);
-  }
-  display_counter++;
-  
-  // Debug output to Serial
-  if (debug_counter % DEBUG_UPDATE_INTERVAL == 0) {
-    Serial.print("Pins: P1=");
-    Serial.print(active1 ? "HIGH" : "LOW");
-    Serial.print(" P2=");
-    Serial.print(active2 ? "HIGH" : "LOW");
-    Serial.print(" P3=");
-    Serial.print(active3 ? "HIGH" : "LOW");
-    Serial.print(" P4=");
-    Serial.print(active4 ? "HIGH" : "LOW");
-    Serial.print(" | Active tracks: ");
+  static unsigned long t1 = 0;
+  static unsigned long t2 = 0;
+  static unsigned long t3 = 0;
+  static unsigned long t4 = 0;
+
+  bool connected1 = false;
+
+  char b = 0;
+
+  int track_id = TRACK_INVALID;
+
+  if (Serial1.available()) {
+    b = Serial1.read();
+    t1 = millis();
+    Serial.print("on 1: ");
+    Serial.println((int)b, HEX);
+
+    track_id = id_to_track(b);
     
-    bool any_active = false;
-    if (active1) { Serial.print("Drums "); any_active = true; }
-    if (active2) { Serial.print("Synth "); any_active = true; }
-    if (active3) { Serial.print("Funk "); any_active = true; }
-    if (active4) { Serial.print("Groove "); any_active = true; }
+    if (!track1.is_playing) {
+      if (track_id != TRACK_INVALID) {
+        track1.track_id = track_id;
+        track1.is_playing = true;
+      }
+    }
+  }
+
+  if (ser2.available()) {
+    b = ser2.read();
+    t2 = millis();
+    Serial.print("on 2: ");
+    Serial.println((int)b, HEX);
+
+    track_id = id_to_track(b);
     
-    if (!any_active) {
-      Serial.print("READY (standby)");
-    }
-    Serial.println();
-  }
-  debug_counter++;
-  
-  // mix and output one sample
-  int32_t mixed = 0;
-  int active_count = 0;
-  
-  if (active1) {
-    // RP2040 can access PROGMEM directly, but pgm_read_word is safer
-    int16_t sample = pgm_read_word(&seventies_funk_drum_loop_109_bpm_data[pos1]);
-    mixed += (int32_t)sample;
-    active_count++;
-    pos1++;
-    if (pos1 >= SEVENTIES_FUNK_DRUM_LOOP_109_BPM_LENGTH) {
-      pos1 = 0;
+    if (!track2.is_playing) {
+      if (track_id != TRACK_INVALID) {
+        track2.track_id = track_id;
+        track2.is_playing = true;
+      }
     }
   }
-  
-  if (active2) {
-    int16_t sample = pgm_read_word(&square_synth_keys_loop_112_bpm_data[pos2]);
-    mixed += (int32_t)sample;
-    active_count++;
-    pos2++;
-    if (pos2 >= SQUARE_SYNTH_KEYS_LOOP_112_BPM_LENGTH) {
-      pos2 = 0;
+
+  if (ser3.available()) {
+    b = ser3.read();
+    t3 = millis();
+    Serial.print("on 3: ");
+    Serial.println((int)b, HEX);
+
+    track_id = id_to_track(b);
+    
+    if (!track3.is_playing) {
+      if (track_id != TRACK_INVALID) {
+        track3.track_id = track_id;
+        track3.is_playing = true;
+      }
     }
   }
-  
-  if (active3) {
-    int16_t sample = pgm_read_word(&funk_groove_loop_data[pos3]);
-    mixed += (int32_t)sample;
-    active_count++;
-    pos3++;
-    if (pos3 >= FUNK_GROOVE_LOOP_LENGTH) {
-      pos3 = 0;
+
+  if (ser4.available()) {
+    b = ser4.read();
+    t4 = millis();
+    Serial.print("on 4: ");
+    Serial.println((int)b, HEX);
+
+    track_id = id_to_track(b);
+    
+    if (!track4.is_playing) {
+      if (track_id != TRACK_INVALID) {
+        track4.track_id = track_id;
+        track4.is_playing = true;
+      }
     }
   }
-  
-  if (active4) {
-    int16_t sample = pgm_read_word(&groove_loop_126_bpm_data[pos4]);
-    mixed += (int32_t)sample;
-    active_count++;
-    pos4++;
-    if (pos4 >= GROOVE_LOOP_126_BPM_LENGTH) {
-      pos4 = 0;
+
+  delay(20);
+
+  if (track1.is_playing) {
+    if (millis() - t1 > DELAY_ABSENT_MS) {
+      track1.is_playing = false;
+      track1.counter = 0;
     }
   }
-  
-  // divide by number of active channels to prevent clipping
-  if (active_count > 0) {
-    mixed /= active_count;
+
+  if (track2.is_playing) {
+    if (millis() - t2 > DELAY_ABSENT_MS) {
+      track2.is_playing = false;
+      track2.counter = 0;
+    }
   }
-  
-  // clamp to int16 range
-  if (mixed > 32767) mixed = 32767;
-  if (mixed < -32768) mixed = -32768;
-  
-  int16_t output = (int16_t)mixed;
-  i2s.write(output);  // left
-  i2s.write(output);  // right (duplicate for stereo)
+
+  if (track3.is_playing) {
+    if (millis() - t3 > DELAY_ABSENT_MS) {
+      track3.is_playing = false;
+      track3.counter = 0;
+    }
+  }
+
+  if (track4.is_playing) {
+    if (millis() - t4 > DELAY_ABSENT_MS) {
+      track4.is_playing = false;
+      track4.counter = 0;
+    }
+  }
 }
