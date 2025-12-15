@@ -1,19 +1,10 @@
-// ATtiny1614 - append device ID after forwarding upstream data
+#include <Arduino.h>
 
-#define DEVICE_ID 0x42  // change per device
+#define SIG_PIN PIN_PB2   // your board's TX pad == PB2
 
 void setup() {
-  Serial.begin(115200);
+  pinMode(SIG_PIN, OUTPUT);
+  digitalWrite(SIG_PIN, HIGH);  // constant high while powered
 }
 
-void loop() {
-  // forward everything from upstream first
-  while (Serial.available()) {
-    Serial.write(Serial.read());
-  }
-  
-  // then append our id
-  Serial.write(DEVICE_ID);
-  
-  delay(10);  // ~100hz
-}
+void loop() { /* nada */ }

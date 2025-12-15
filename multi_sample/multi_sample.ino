@@ -14,274 +14,215 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 I2S i2s(OUTPUT);
 
+// input pins - connected to TX pins from controller
+// PIN1 = GPIO 3 (P3/D10) -> drums
+// PIN2 = GPIO 4 (P4/D9) -> synth
+// PIN3 = GPIO 2 (P2/D8) -> funk
+// PIN4 = GPIO 1 (P1/D7) -> groove
+#define PIN1 3
+#define PIN2 4
+#define PIN3 2
+#define PIN4 1
+
+// track position in each sample
 uint32_t pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
 
-const char *track1_name = "Drums";
-const char *track2_name = "Synth Keys";
-const char *track3_name = "Funk Groove";
-const char *track4_name = "Groove";
-
-// uint8_t stable_devices[10];
-// uint8_t stable_num_devices = 0;
-uint32_t last_uart_read = 0;
-#define UART_READ_INTERVAL 200 // read uart every 20ms
+const char* pin1_name = "Drums";
+const char* pin2_name = "Synth Keys";
+const char* pin3_name = "Funk Groove";
+const char* pin4_name = "Groove";
 
 uint32_t display_counter = 0;
-#define DISPLAY_UPDATE_INTERVAL 4410
+#define DISPLAY_UPDATE_INTERVAL 4410  // update ~10x per second
 uint32_t debug_counter = 0;
-#define DEBUG_UPDATE_INTERVAL 4410
+#define DEBUG_UPDATE_INTERVAL 4410  // print debug info ~10x per second
 
-uint8_t active_devices[10]; // store up to 10 device ids
-uint8_t num_devices = 0;
-
-// map device id to track number (1-4)
-uint8_t deviceToTrack(uint8_t id)
-{
-	switch (id)
-	{
-	case 0x42:
-		return 1; // drums
-	case 0x02:
-		return 2; // synth
-	case 0x03:
-		return 3; // funk
-	case 0x04:
-		return 4; // groove
-	default:
-		return 0; // unknown id, no track
-	}
+void updateDisplay(bool active1, bool active2, bool active3, bool active4) {
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  
+  // Check if any pin is active
+  bool any_active = active1 || active2 || active3 || active4;
+  
+  if (!any_active) {
+    // Show "ready" when no pins are active (standby)
+    display.setTextSize(2);
+    display.setCursor(20, 24);
+    display.println("ready");
+  } else {
+    // Show active pins
+    display.setTextSize(1);
+    int y = 0;
+    if (active1) {
+      display.setCursor(0, y);
+      display.print("P"); display.print(PIN1);
+      display.print(": "); display.println(pin1_name);
+      y += 10;
+    }
+    if (active2) {
+      display.setCursor(0, y);
+      display.print("P"); display.print(PIN2);
+      display.print(": "); display.println(pin2_name);
+      y += 10;
+    }
+    if (active3) {
+      display.setCursor(0, y);
+      display.print("P"); display.print(PIN3);
+      display.print(": "); display.println(pin3_name);
+      y += 10;
+    }
+    if (active4) {
+      display.setCursor(0, y);
+      display.print("P"); display.print(PIN4);
+      display.print(": "); display.println(pin4_name);
+      y += 10;
+    }
+  }
+  
+  display.display();
 }
 
-void updateDisplay(bool active1, bool active2, bool active3, bool active4)
-{
-	display.clearDisplay();
-	display.setTextColor(SSD1306_WHITE);
-
-	bool any_active = active1 || active2 || active3 || active4;
-
-	if (!any_active)
-	{
-		display.setTextSize(2);
-		display.setCursor(20, 24);
-		display.println("ready");
-	}
-	else
-	{
-		display.setTextSize(1);
-		int y = 0;
-		if (active1)
-		{
-			display.setCursor(0, y);
-			display.print("T1: ");
-			display.println(track1_name);
-			y += 10;
-		}
-		if (active2)
-		{
-			display.setCursor(0, y);
-			display.print("T2: ");
-			display.println(track2_name);
-			y += 10;
-		}
-		if (active3)
-		{
-			display.setCursor(0, y);
-			display.print("T3: ");
-			display.println(track3_name);
-			y += 10;
-		}
-		if (active4)
-		{
-			display.setCursor(0, y);
-			display.print("T4: ");
-			display.println(track4_name);
-			y += 10;
-		}
-	}
-
-	// show connected device ids at bottom
-	if (num_devices > 0)
-	{
-		display.setCursor(0, 56);
-		display.print("IDs: ");
-		for (int i = 0; i < num_devices && i < 5; i++)
-		{
-			display.print("0x");
-			if (active_devices[i] < 16)
-				display.print("0");
-			display.print(active_devices[i], HEX);
-			if (i < num_devices - 1)
-				display.print(" ");
-		}
-	}
-
-	display.display();
+void setup() {
+  Serial.begin(115200);
+  delay(1000);  // Wait for Serial to initialize
+  Serial.println("\n\n=== RP2040 Music Machine Starting ===");
+  Serial.println("Serial monitor connected!");
+  
+  // Use INPUT if TX pins actively drive the line, INPUT_PULLDOWN if they're open-drain
+  // pinMode(PIN1, INPUT_PULLDOWN)
+  pinMode(PIN1, INPUT_PULLDOWN);  // TX pins typically drive HIGH/LOW, no pull needed
+  pinMode(PIN2, INPUT_PULLDOWN);
+  pinMode(PIN3, INPUT_PULLDOWN);
+  pinMode(PIN4, INPUT_PULLDOWN);
+  Serial.println("Pins configured as INPUT");
+  
+  Wire.setSDA(6);  // for SDA on pin 6
+  Wire.setSCL(7);  // for SCL on pin 7
+  Wire.begin();
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("Display FAIL!");
+    while(1);
+  }
+  
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setCursor(20, 24);
+  display.println("ready");
+  display.display();
+  
+  Serial.println("Audio data loaded from header files!");
+  Serial.print("  Drums: "); Serial.print(SEVENTIES_FUNK_DRUM_LOOP_109_BPM_LENGTH); Serial.println(" samples");
+  Serial.print("  Synth: "); Serial.print(SQUARE_SYNTH_KEYS_LOOP_112_BPM_LENGTH); Serial.println(" samples");
+  Serial.print("  Funk: "); Serial.print(FUNK_GROOVE_LOOP_LENGTH); Serial.println(" samples");
+  Serial.print("  Groove: "); Serial.print(GROOVE_LOOP_126_BPM_LENGTH); Serial.println(" samples");
+  Serial.println("System ready - waiting for pin input...");
+  Serial.println("---");
+  
+  i2s.setBCLK(28);
+  i2s.setDATA(27);
+  i2s.setBitsPerSample(16);
+  
+  // Use the sample rate from headers (they should all be the same)
+  if(!i2s.begin(SEVENTIES_FUNK_DRUM_LOOP_109_BPM_RATE)) {
+    Serial.println("I2S FAILED!");
+    while(1);
+  }
+  Serial.print("I2S initialized at "); 
+  Serial.print(SEVENTIES_FUNK_DRUM_LOOP_109_BPM_RATE); 
+  Serial.println(" Hz");
 }
 
-void setup()
-{
-	Serial.begin(115200);
-	delay(1000);
-	Serial.println("\n\n=== RP2040 Music Machine Starting ===");
-
-	Serial1.begin(115200);
-
-	Wire.setSDA(6);
-	Wire.setSCL(7);
-	Wire.begin();
-  Wire.setClock(400000); // NEW
-	if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
-	{
-		Serial.println("Display FAIL!");
-		while (1)
-			;
-	}
-
-	display.clearDisplay();
-	display.setTextSize(2);
-	display.setCursor(20, 24);
-	display.println("ready");
-	display.display();
-
-	Serial.println("Audio data loaded!");
-
-	i2s.setBCLK(28);
-	i2s.setDATA(27);
-	i2s.setBitsPerSample(16);
-  i2s.setBuffers(8, 256, 0);
-
-	if (!i2s.begin(SEVENTIES_FUNK_DRUM_LOOP_109_BPM_RATE))
-	{
-		Serial.println("I2S FAILED!");
-		while (1)
-			;
-	}
-	Serial.print("I2S at ");
-	Serial.print(SEVENTIES_FUNK_DRUM_LOOP_109_BPM_RATE);
-	Serial.println(" Hz");
-}
-
-void loop()
-{
-	// read all available device ids from uart
-	// num_devices = 0;
-	// while (Serial1.available() && num_devices < 10) {
-	//   active_devices[num_devices++] = Serial1.read();
-	// }
-	//   if (millis() - last_uart_read >= UART_READ_INTERVAL) {
-	//     stable_num_devices = 0;
-	//     while (Serial1.available() && stable_num_devices < 10) {
-	//       stable_devices[stable_num_devices++] = Serial1.read();
-	//     }
-	//     last_uart_read = millis();
-	//   }
-
-  static uint32_t sample_count = 0;
-  static uint8_t stable_devices[10];
-  static uint8_t stable_num_devices = 0;
-
-  if (sample_count % 4410 == 0) {
-    stable_num_devices = 0;  // reset for new packet
+void loop() {
+  bool active1 = digitalRead(PIN1);
+  bool active2 = digitalRead(PIN2);
+  bool active3 = digitalRead(PIN3);
+  bool active4 = digitalRead(PIN4);
+  
+  if (display_counter % DISPLAY_UPDATE_INTERVAL == 0) {
+    updateDisplay(active1, active2, active3, active4);
   }
-
-  // read one byte per sample, accumulate over time
-  if (Serial1.available() && stable_num_devices < 10) {
-    stable_devices[stable_num_devices++] = Serial1.read();
+  display_counter++;
+  
+  // Debug output to Serial
+  if (debug_counter % DEBUG_UPDATE_INTERVAL == 0) {
+    Serial.print("Pins: P1=");
+    Serial.print(active1 ? "HIGH" : "LOW");
+    Serial.print(" P2=");
+    Serial.print(active2 ? "HIGH" : "LOW");
+    Serial.print(" P3=");
+    Serial.print(active3 ? "HIGH" : "LOW");
+    Serial.print(" P4=");
+    Serial.print(active4 ? "HIGH" : "LOW");
+    Serial.print(" | Active tracks: ");
+    
+    bool any_active = false;
+    if (active1) { Serial.print("Drums "); any_active = true; }
+    if (active2) { Serial.print("Synth "); any_active = true; }
+    if (active3) { Serial.print("Funk "); any_active = true; }
+    if (active4) { Serial.print("Groove "); any_active = true; }
+    
+    if (!any_active) {
+      Serial.print("READY (standby)");
+    }
+    Serial.println();
   }
-
-  sample_count++;
-
-	// figure out which tracks are active based on device ids
-	bool active1 = false, active2 = false, active3 = false, active4 = false;
-	// for (int i = 0; i < num_devices; i++) {
-	//   uint8_t track = deviceToTrack(active_devices[i]);
-  for (int i = 0; i < stable_num_devices; i++) {
-    uint8_t track = deviceToTrack(stable_devices[i]);
-    if (track == 1)
-      active1 = true;
-    if (track == 2)
-      active2 = true;
-    if (track == 3)
-      active3 = true;
-    if (track == 4)
-      active4 = true;
+  debug_counter++;
+  
+  // mix and output one sample
+  int32_t mixed = 0;
+  int active_count = 0;
+  
+  if (active1) {
+    // RP2040 can access PROGMEM directly, but pgm_read_word is safer
+    int16_t sample = pgm_read_word(&seventies_funk_drum_loop_109_bpm_data[pos1]);
+    mixed += (int32_t)sample;
+    active_count++;
+    pos1++;
+    if (pos1 >= SEVENTIES_FUNK_DRUM_LOOP_109_BPM_LENGTH) {
+      pos1 = 0;
+    }
   }
-
-	if (display_counter % DISPLAY_UPDATE_INTERVAL == 0)
-	{
-		// updateDisplay(active1, active2, active3, active4);
-	}
-	display_counter++;
-
-	// if (debug_counter % DEBUG_UPDATE_INTERVAL == 0)
-	// {
-	// 	Serial.print("Devices: ");
-	// 	for (int i = 0; i < num_devices; i++)
-	// 	{
-	// 		Serial.print("0x");
-	// 		Serial.print(stable_devices[i], HEX);
-	// 		Serial.print(" ");
-	// 	}
-	// 	Serial.print("| Tracks: ");
-	// 	if (active1)
-	// 		Serial.print("Drums ");
-	// 	if (active2)
-	// 		Serial.print("Synth ");
-	// 	if (active3)
-	// 		Serial.print("Funk ");
-	// 	if (active4)
-	// 		Serial.print("Groove ");
-	// 	if (!active1 && !active2 && !active3 && !active4)
-	// 		Serial.print("READY");
-	// 	Serial.println();
-	// }
-	debug_counter++;
-
-	// mix audio
-	int32_t mixed = 0;
-	int active_count = 0;
-
-	if (active1) {
-	mixed += (int32_t)pgm_read_word(&seventies_funk_drum_loop_109_bpm_data[pos1]);
-	active_count++;
-	pos1++;
-	if (pos1 >= SEVENTIES_FUNK_DRUM_LOOP_109_BPM_LENGTH)
-		pos1 = 0;
-	}
-
-	if (active2)
-	{
-		mixed += (int32_t)pgm_read_word(&square_synth_keys_loop_112_bpm_data[pos2]);
-		active_count++;
-		pos2++;
-		if (pos2 >= SQUARE_SYNTH_KEYS_LOOP_112_BPM_LENGTH)
-			pos2 = 0;
-	}
-
-	if (active3)
-	{
-		mixed += (int32_t)pgm_read_word(&funk_groove_loop_data[pos3]);
-		active_count++;
-		pos3++;
-		if (pos3 >= FUNK_GROOVE_LOOP_LENGTH)
-			pos3 = 0;
-	}
-
-	// if (active4) {
-		mixed += (int32_t)pgm_read_word(&groove_loop_126_bpm_data[pos4]);
-		active_count++;
-		pos4++;
-		if (pos4 >= GROOVE_LOOP_126_BPM_LENGTH)
-			pos4 = 0;
-	// }
-
-	if (active_count > 0)
-		mixed /= active_count;
-	if (mixed > 32767)
-		mixed = 32767;
-	if (mixed < -32768)
-		mixed = -32768;
-
-	int16_t output = (int16_t)mixed;
-  i2s.write16(output, output);
+  
+  if (active2) {
+    int16_t sample = pgm_read_word(&square_synth_keys_loop_112_bpm_data[pos2]);
+    mixed += (int32_t)sample;
+    active_count++;
+    pos2++;
+    if (pos2 >= SQUARE_SYNTH_KEYS_LOOP_112_BPM_LENGTH) {
+      pos2 = 0;
+    }
+  }
+  
+  if (active3) {
+    int16_t sample = pgm_read_word(&funk_groove_loop_data[pos3]);
+    mixed += (int32_t)sample;
+    active_count++;
+    pos3++;
+    if (pos3 >= FUNK_GROOVE_LOOP_LENGTH) {
+      pos3 = 0;
+    }
+  }
+  
+  if (active4) {
+    int16_t sample = pgm_read_word(&groove_loop_126_bpm_data[pos4]);
+    mixed += (int32_t)sample;
+    active_count++;
+    pos4++;
+    if (pos4 >= GROOVE_LOOP_126_BPM_LENGTH) {
+      pos4 = 0;
+    }
+  }
+  
+  // divide by number of active channels to prevent clipping
+  if (active_count > 0) {
+    mixed /= active_count;
+  }
+  
+  // clamp to int16 range
+  if (mixed > 32767) mixed = 32767;
+  if (mixed < -32768) mixed = -32768;
+  
+  int16_t output = (int16_t)mixed;
+  i2s.write(output);  // left
+  i2s.write(output);  // right (duplicate for stereo)
 }
