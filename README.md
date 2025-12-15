@@ -2,6 +2,7 @@
 
 project for how to make anything 
 
+click on image below to watch the video (audio on!)
 <a href="https://hc-cdn.hel1.your-objectstorage.com/s/v3/322dd51cfb4696cc_img_6383.mp4s">
   <img src="images/frame.png" alt="Watch the video" width="600"/>
 </a>
