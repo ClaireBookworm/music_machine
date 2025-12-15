@@ -1,7 +1,7 @@
-#include "Seventies-funk-drum-loop-109-BPM.h"
-#include "Square-synth-keys-loop-112-bpm.h"
-#include "Funk-groove-loop.h"
-#include "Groove-loop-126-bpm.h"
+#include "120-bpm-hip-hop-drum-loop.h"
+#include "Drum-groove-120-bpm.h"
+#include "Electro-loop-120-bpm.h"
+#include "Retro-style-drum-beat-120-bpm.h"
 #include <I2S.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -29,9 +29,9 @@ I2S i2s(OUTPUT);
 
 uint32_t _delT_us = SAMPLE_DT_US;
 
-const int16_t* track_pointers[N_TRACKS] = {seventies_funk_drum_loop_109_bpm_data, square_synth_keys_loop_112_bpm_data, funk_groove_loop_data, groove_loop_126_bpm_data};
-int32_t track_lengths[N_TRACKS] = {SEVENTIES_FUNK_DRUM_LOOP_109_BPM_LENGTH, SQUARE_SYNTH_KEYS_LOOP_112_BPM_LENGTH, FUNK_GROOVE_LOOP_LENGTH, GROOVE_LOOP_126_BPM_LENGTH};
-const char* track_names[N_TRACKS] = {"Drums", "Synth Keys", "Funk Groove", "Groove"};
+const int16_t* track_pointers[N_TRACKS] = {hip_hop_drum_loop_120_bpm_data, drum_groove_120_bpm_data, electro_loop_120_bpm_data, retro_style_drum_beat_120_bpm_data};
+int32_t track_lengths[N_TRACKS] = {HIP_HOP_DRUM_LOOP_LENGTH_120_BPM, DRUM_GROOVE_120_BPM_LENGTH, ELECTRO_LOOP_120_BPM_LENGTH, RETRO_STYLE_DRUM_BEAT_120_BPM_LENGTH};
+const char* track_names[N_TRACKS] = {"Hip Hop Drums", "Drum Groove", "Electro Loop", "Retro Drum"};
 
 struct TrackInfo {
   bool is_playing;

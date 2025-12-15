@@ -1,7 +1,7 @@
-#include "Seventies-funk-drum-loop-109-BPM.h"
-#include "Square-synth-keys-loop-112-bpm.h"
-#include "Funk-groove-loop.h"
-#include "Groove-loop-126-bpm.h"
+#include "Aurora-synth-loop-120.h"
+#include "Calming-ambient-analog-synth-loop-120-BPM.h"
+#include "Melodic-groove-bass-synth-loop.h"
+#include "Noisy-music-loop-120-bpm.h"
 #include <I2S.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -29,9 +29,9 @@ I2S i2s(OUTPUT);
 
 uint32_t _delT_us = SAMPLE_DT_US;
 
-const int16_t* track_pointers[N_TRACKS] = {seventies_funk_drum_loop_109_bpm_data, square_synth_keys_loop_112_bpm_data, funk_groove_loop_data, groove_loop_126_bpm_data};
-int32_t track_lengths[N_TRACKS] = {SEVENTIES_FUNK_DRUM_LOOP_109_BPM_LENGTH, SQUARE_SYNTH_KEYS_LOOP_112_BPM_LENGTH, FUNK_GROOVE_LOOP_LENGTH, GROOVE_LOOP_126_BPM_LENGTH};
-const char* track_names[N_TRACKS] = {"Drums", "Synth Keys", "Funk Groove", "Groove"};
+const int16_t* track_pointers[N_TRACKS] = {aurora_synth_loop_120_data, calming_ambient_analog_synth_loop_120_bpm_data, melodic_groove_bass_synth_loop_data, noisy_music_loop_120_bpm_data};
+int32_t track_lengths[N_TRACKS] = {AURORA_SYNTH_LOOP_120_LENGTH, CALMING_AMBIENT_ANALOG_SYNTH_LOOP_120_BPM_LENGTH, MELODIC_GROOVE_BASS_SYNTH_LOOP_LENGTH, NOISY_MUSIC_LOOP_120_BPM_LENGTH};
+const char* track_names[N_TRACKS] = {"Aurora Synth", "Calming Ambient", "Melodic Groove Bass", "Noisy Synths"};
 
 struct TrackInfo {
   bool is_playing;
