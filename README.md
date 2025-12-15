@@ -2,9 +2,7 @@
 
 project for how to make anything 
 
-```markdown
 [![Watch the video](images/frame1.png)](https://hc-cdn.hel1.your-objectstorage.com/s/v3/322dd51cfb4696cc_img_6383.mp4s)
-```
 
 Code for attiny1614 microcontrollers (in the blocks) are in `controller_1614_ino` folder. 
 
